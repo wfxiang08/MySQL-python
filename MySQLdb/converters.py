@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 """MySQLdb type conversion module
 
 This module handles all the type conversions for MySQL. If the default
@@ -149,6 +150,8 @@ conversions = {
     DateTimeType: DateTime2literal,
     DateTimeDeltaType: DateTimeDelta2literal,
     set: Set2Str,
+
+    # 来自MySQL的数据类型最终如何转换成为python的数据类型
     FIELD_TYPE.TINY: int,
     FIELD_TYPE.SHORT: int,
     FIELD_TYPE.LONG: long,

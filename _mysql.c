@@ -83,6 +83,7 @@ static PyObject *_mysql_InternalError;
 static PyObject *_mysql_ProgrammingError;
 static PyObject *_mysql_NotSupportedError;
  
+// 如何记录MySQL的连接状态呢?
 typedef struct {
 	PyObject_HEAD
 	MYSQL connection;
@@ -559,6 +560,8 @@ _mysql_ConnectionObject_Initialize(
 		*db = NULL, *unix_socket = NULL;
 	unsigned int port = 0;
 	unsigned int client_flag = 0;
+	
+	
 	static char *kwlist[] = { "host", "user", "passwd", "db", "port",
 				  "unix_socket", "conv",
 				  "connect_timeout", "compress",
@@ -585,6 +588,7 @@ _mysql_ConnectionObject_Initialize(
 	self->open = 0;
 	check_server_init(-1);
 
+	// 读取host等各种数据库相关的参数
 	if (!PyArg_ParseTupleAndKeywords(args, kwargs,
 #ifdef HAVE_MYSQL_OPT_TIMEOUTS
                                          "|ssssisOiiisssiOiii:connect",
@@ -631,14 +635,15 @@ _mysql_ConnectionObject_Initialize(
 		return -1;
 #endif
 	}
-
+	
+	// 1. 初始化数据库连接 & 设置connect_timeout
 	Py_BEGIN_ALLOW_THREADS ;
 	conn = mysql_init(&(self->connection));
 	if (connect_timeout) {
 		unsigned int timeout = connect_timeout;
-		mysql_options(&(self->connection), MYSQL_OPT_CONNECT_TIMEOUT, 
-				(char *)&timeout);
+		mysql_options(&(self->connection), MYSQL_OPT_CONNECT_TIMEOUT, (char *)&timeout);
 	}
+	// 设置MySQL的读写的timeout
 #ifdef HAVE_MYSQL_OPT_TIMEOUTS
 	if (read_timeout) {
 		unsigned int timeout = read_timeout;
@@ -657,8 +662,12 @@ _mysql_ConnectionObject_Initialize(
 	}
 	if (named_pipe != -1)
 		mysql_options(&(self->connection), MYSQL_OPT_NAMED_PIPE, 0);
+	
+	// init_command
+	// 在数据库连接的时候这些option是如何发挥作用的,是否有数据库通信呢?
 	if (init_command != NULL)
 		mysql_options(&(self->connection), MYSQL_INIT_COMMAND, init_command);
+	
 	if (read_default_file != NULL)
 		mysql_options(&(self->connection), MYSQL_READ_DEFAULT_FILE, read_default_file);
 	if (read_default_group != NULL)
@@ -673,6 +682,7 @@ _mysql_ConnectionObject_Initialize(
 			      key, cert, ca, capath, cipher);
 #endif
 
+	// 2. 直接尝试连接?
 	conn = mysql_real_connect(&(self->connection), host, user, passwd, db,
 				  port, unix_socket, client_flag);
 
@@ -699,6 +709,7 @@ _mysql_ConnectionObject_Initialize(
 	  be done here. tp_dealloc still needs to call PyObject_GC_UnTrack(),
 	  however.
 	*/
+	// 3.连接完毕之后，就算是打开了
 	self->open = 1;
 	return 0;
 }
@@ -805,6 +816,9 @@ _mysql_ConnectionObject_close(
 	if (args) {
 		if (!PyArg_ParseTuple(args, "")) return NULL;
 	}
+	
+	// 直接关闭一个MYSQL connection
+	// 注意: 如果有未提交的transaction, 基本上和rollback是一样的，反正最终的数据没有了
 	if (self->open) {
 		Py_BEGIN_ALLOW_THREADS
 		mysql_close(&(self->connection));
@@ -886,7 +900,9 @@ _mysql_ConnectionObject_autocommit(
 	int flag, err;
 	if (!PyArg_ParseTuple(args, "i", &flag)) return NULL;
 	Py_BEGIN_ALLOW_THREADS
+	
 #if MYSQL_VERSION_ID >= 40100
+  // 调用: mysql api: mysql_autocommit来控制 connection
 	err = mysql_autocommit(&(self->connection), flag);
 #else
 	{
@@ -1197,10 +1213,15 @@ _escape_item(
 	PyObject *d)
 {
 	PyObject *quoted=NULL, *itemtype, *itemconv;
+	// 1. 获取itemtype
 	if (!(itemtype = PyObject_Type(item)))
 		goto error;
+	
+	// 2. 获取itemconv
 	itemconv = PyObject_GetItem(d, itemtype);
 	Py_DECREF(itemtype);
+	
+	// 如果没有itemconv, 
 	if (!itemconv) {
 		PyErr_Clear();
 		itemconv = PyObject_GetItem(d,
@@ -1235,10 +1256,11 @@ _mysql_escape(
 	PyObject *o=NULL, *d=NULL;
 	if (!PyArg_ParseTuple(args, "O|O:escape", &o, &d))
 		return NULL;
+	
 	if (d) {
+		// 如果制定了mapping
 		if (!PyMapping_Check(d)) {
-			PyErr_SetString(PyExc_TypeError,
-					"argument 2 must be a mapping");
+			PyErr_SetString(PyExc_TypeError, "argument 2 must be a mapping");
 			return NULL;
 		}
 		return _escape_item(o, d);
@@ -1248,6 +1270,7 @@ _mysql_escape(
 					"argument 2 must be a mapping");
 			return NULL;
 		}
+		// 如果没有指定，则使用connection默认的mapping
 		return _escape_item(o,
 			   ((_mysql_ConnectionObject *) self)->converter);
 	}
@@ -2757,6 +2780,7 @@ _mysql_ResultObject_setattr(
 #endif
 }
 
+// 定义： _mysql.connection类型
 PyTypeObject _mysql_ConnectionObject_Type = {
 #ifdef IS_PY3K
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -2934,9 +2958,11 @@ PyTypeObject _mysql_ResultObject_Type = {
 #endif /* python 2.0 */
 };
 
+// 定义_mysql
 static PyMethodDef
 _mysql_methods[] = {
-	{ 
+	{
+	  // 创建一个MYSQL				
 		"connect",
 		(PyCFunction)_mysql_connect,
 		METH_VARARGS | METH_KEYWORDS,

@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 """
 
 This module implements connections for MySQLdb. Presently there is
@@ -56,7 +57,7 @@ def numeric_part(s):
 class Connection(_mysql.connection):
 
     """MySQL Database Connection Object"""
-
+    # 默认的Cursor
     default_cursor = cursors.Cursor
 
     def __init__(self, *args, **kwargs):
@@ -140,7 +141,7 @@ class Connection(_mysql.connection):
           integer, non-zero enables LOAD LOCAL INFILE; zero disables
 
         autocommit
-          If False (default), autocommit is disabled.
+          If False (default), autocommit is disabled. (默认为False, 需要手动去commit)
           If True, autocommit is enabled.
           If None, autocommit isn't set and server default is used.
 
@@ -192,8 +193,9 @@ class Connection(_mysql.connection):
 
         super(Connection, self).__init__(*args, **kwargs2)
         self.cursorclass = cursorclass
-        self.encoders = dict([ (k, v) for k, v in conv.items()
-                               if type(k) is not int ])
+
+        # 默认采用: converter中定义的 conversions
+        self.encoders = dict([ (k, v) for k, v in conv.items() if type(k) is not int ])
 
         self._server_version = tuple([ numeric_part(n) for n in self.get_server_info().split('.')[:2] ])
 
@@ -232,6 +234,8 @@ class Connection(_mysql.connection):
         self.encoders[types.StringType] = string_literal
         self.encoders[types.UnicodeType] = unicode_literal
         self._transactional = self.server_capabilities & CLIENT.TRANSACTIONS
+
+        # 数据库是否支持: 事务
         if self._transactional:
             if autocommit is not None:
                 self.autocommit(autocommit)
@@ -250,6 +254,7 @@ class Connection(_mysql.connection):
         Cursor. By default, self.cursorclass=cursors.Cursor is
         used.
 
+        # 创建一个新的cursor
         """
         return (cursorclass or self.cursorclass)(self)
 
@@ -303,10 +308,15 @@ class Connection(_mysql.connection):
         set can only be changed in MySQL-4.1 and newer. If you try
         to change the character set from the current value in an
         older version, NotSupportedError will be raised."""
+        # 这里有两个概念:
+        # py_charset 和 charset
+        # 其中: charset是和数据库通信的; py_charset是python如何理解数据库返回, 其实在python, java内部不存在: utf8mb4这种编码，都统一为utf8编码
         if charset == "utf8mb4":
             py_charset = "utf8"
         else:
             py_charset = charset
+
+
         if self.character_set_name() != charset:
             try:
                 super(Connection, self).set_character_set(charset)

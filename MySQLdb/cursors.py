@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 """MySQLdb Cursors
 
 This module implements Cursors of various types for MySQLdb. By
@@ -74,8 +75,12 @@ class BaseCursor(object):
     
     def __init__(self, connection):
         from weakref import proxy
-    
+
+        # cursor vs. connection
         self.connection = proxy(connection)
+        self.errorhandler = connection.errorhandler
+
+
         self.description = None
         self.description_flags = None
         self.rowcount = -1
@@ -83,13 +88,14 @@ class BaseCursor(object):
         self._executed = None
         self.lastrowid = None
         self.messages = []
-        self.errorhandler = connection.errorhandler
+
         self._result = None
         self._warnings = 0
         self._info = None
         self.rownumber = None
         
     def __del__(self):
+        # 在删除cursor时，会自动close; 当然手动调用close更好了
         self.close()
         self.errorhandler = None
         self._result = None
@@ -157,6 +163,10 @@ class BaseCursor(object):
         """Does nothing, required by DB API."""
 
     def _get_db(self):
+        """
+        返回connection, 并且做一些特殊的检查
+        :return:
+        """
         if not self.connection:
             self.errorhandler(self, ProgrammingError, "cursor closed")
         return self.connection
@@ -176,21 +186,24 @@ class BaseCursor(object):
 
         """
         del self.messages[:]
+
         db = self._get_db()
+
+        # 默认将query转换成为: utf8
         if isinstance(query, unicode):
             query = query.encode(db.unicode_literal.charset)
+
         if args is not None:
+            # 将item转换成为数据库(SQL)支持的字符串
             if isinstance(args, dict):
-                query = query % dict((key, db.literal(item))
-                                     for key, item in args.iteritems())
+                query = query % dict((key, db.literal(item)) for key, item in args.iteritems())
             else:
                 query = query % tuple([db.literal(item) for item in args])
         try:
             r = None
             r = self._query(query)
         except TypeError, m:
-            if m.args[0] in ("not enough arguments for format string",
-                             "not all arguments converted"):
+            if m.args[0] in ("not enough arguments for format string", "not all arguments converted"):
                 self.messages.append((ProgrammingError, m.args[0]))
                 self.errorhandler(self, ProgrammingError, m.args[0])
             else:
@@ -201,10 +214,15 @@ class BaseCursor(object):
         except:
             exc, value, tb = sys.exc_info()
             del tb
+
+            # 其他类型的错误，例如: OperationalError: (2013, 'Lost connection to MySQL server during query')
+            # 为什么会发生? 什么情况下会发生?
             self.messages.append((exc, value))
             self.errorhandler(self, exc, value)
+
         self._executed = query
         if not self._defer_warnings: self._warning_check()
+
         return r
 
     def executemany(self, query, args):
